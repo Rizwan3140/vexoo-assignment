@@ -1,9 +1,3 @@
-"""
-Part 1: Sliding Window + Knowledge Pyramid Document Ingestion System
-Vexoo Labs AI Engineer Assignment
-Author: Rizwan Ansar
-"""
-
 import sys
 import re
 import nltk
@@ -21,17 +15,7 @@ nltk.download('punkt_tab', quiet=True)
 
 STOPWORDS = set(stopwords.words('english'))
 
-
-# ─────────────────────────────────────────────
-# 0. PDF LOADER
-# ─────────────────────────────────────────────
-
 def load_pdf(path: str) -> str:
-    """
-    Extract all text from a PDF file using PyMuPDF.
-    Reads page by page and joins into a single string.
-    Install: pip install pymupdf
-    """
     doc = fitz.open(path)
     full_text = ""
     for page in doc:
@@ -41,22 +25,8 @@ def load_pdf(path: str) -> str:
     return full_text
 
 
-# ─────────────────────────────────────────────
-# 1. SLIDING WINDOW STRATEGY
-# ─────────────────────────────────────────────
-
-def sliding_window_chunks(
-    text: str,
-    window_size: int = 2500,  # ~2 pages at ~1250 chars/page
-    overlap: int = 300,       # overlap to preserve cross-boundary context
-) -> List[Dict[str, Any]]:
-    """
-    Split text into overlapping windows of ~2 pages each.
-
-    Instead of cutting at a hard character limit, we snap each window
-    to the nearest sentence boundary — so chunks always start and end
-    at a clean sentence, no mid-word or mid-sentence cuts.
-    """
+def sliding_window_chunks(text: str, window_size: int = 2500, overlap: int = 300) -> List[Dict[str, Any]]:
+    # Split text into overlapping 2-page chunks at sentence boundaries
     sentences = sent_tokenize(text.strip())
 
     chunks = []
@@ -67,7 +37,6 @@ def sliding_window_chunks(
         chunk_sentences = []
         char_count = 0
 
-        # Keep adding sentences until we hit the window size
         j = i
         while j < len(sentences) and char_count < window_size:
             chunk_sentences.append(sentences[j])
@@ -82,7 +51,6 @@ def sliding_window_chunks(
 
         idx += 1
 
-        # Slide forward by (window_size - overlap) worth of sentences
         overlap_chars = 0
         step = j - i
         for k in range(i, j):
@@ -96,21 +64,8 @@ def sliding_window_chunks(
     return chunks
 
 
-# ─────────────────────────────────────────────
-# 2. KNOWLEDGE PYRAMID LAYERS
-# ─────────────────────────────────────────────
-
-# Layer 0: Raw Text — original chunk, preserved as-is
-
 def summarize_chunk(text: str, query: str = "", n_sentences: int = 3) -> str:
-    """
-    Layer 1: Chunk Summary
-    Uses NLTK sent_tokenize to split into proper sentences.
-    If a query is provided, picks the N sentences most relevant to it.
-    If no query, falls back to first N sentences.
-    Always returns complete sentences — no mid-word cuts.
-    In production, replace with BART or T5 for abstractive summarization.
-    """
+    # Return query-relevant sentences as summary
     sentences = sent_tokenize(text.strip())
     if not sentences:
         return text[:300]
@@ -144,11 +99,7 @@ CATEGORY_RULES = {
 }
 
 def classify_chunk(text: str) -> str:
-    """
-    Layer 2: Category / Theme Label
-    Rule-based classification using keyword frequency.
-    Returns the category with the highest keyword match count.
-    """
+    # Rule-based category detection using keyword frequency
     text_lower = text.lower()
     scores = {
         category: sum(text_lower.count(kw) for kw in keywords)
@@ -163,12 +114,7 @@ def classify_chunk(text: str) -> str:
 
 
 def distill_keywords(text: str, top_n: int = 10) -> List[str]:
-    """
-    Layer 3: Distilled Knowledge
-    Uses sklearn TfidfVectorizer to extract top-N meaningful keywords.
-    TF-IDF penalizes overly common words naturally — better than raw frequency.
-    In production, replace with KeyBERT or YAKE for even better results.
-    """
+    # TF-IDF based top-N keyword extraction
     vectorizer = TfidfVectorizer(
         stop_words=list(STOPWORDS),
         max_features=top_n,
@@ -183,9 +129,7 @@ def distill_keywords(text: str, top_n: int = 10) -> List[str]:
 
 
 def build_pyramid(chunk: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Builds the full 4-layer Knowledge Pyramid for a single chunk.
-    """
+    # Build all 4 layers for a single chunk
     text = chunk["text"]
     return {
         "id": chunk["id"],
@@ -195,21 +139,8 @@ def build_pyramid(chunk: Dict[str, Any]) -> Dict[str, Any]:
         "layer_3_keywords": distill_keywords(text),
     }
 
-
-# ─────────────────────────────────────────────
-# 3. RETRIEVAL USING SKLEARN COSINE SIMILARITY
-# ─────────────────────────────────────────────
-
-def retrieve(
-    query: str,
-    pyramid_index: List[Dict[str, Any]],
-    top_k: int = 3,
-) -> List[Dict[str, Any]]:
-    """
-    Retrieve top-k most relevant chunks for a query.
-    Uses sklearn TfidfVectorizer + cosine_similarity.
-    Query and all chunks are vectorized together for consistent vocab.
-    """
+def retrieve(query: str, pyramid_index: List[Dict[str, Any]], top_k: int = 3,) -> List[Dict[str, Any]]:
+    # Rank chunks by cosine similarity to query
     corpus = []
     for pyramid in pyramid_index:
         combined = " ".join([
@@ -243,63 +174,19 @@ def retrieve(
 
     return results
 
-
-# ─────────────────────────────────────────────
-# 4. END-TO-END PIPELINE
-# ─────────────────────────────────────────────
-
 def ingest_document(text: str) -> List[Dict[str, Any]]:
-    """
-    Full pipeline: raw text → sliding windows → knowledge pyramids.
-    """
-    print(f"[Ingestion] Document length: {len(text)} chars")
 
     chunks = sliding_window_chunks(text)
-    print(f"[Ingestion] Created {len(chunks)} overlapping chunks")
 
     pyramid_index = []
     for chunk in chunks:
         pyramid = build_pyramid(chunk)
         pyramid_index.append(pyramid)
-        print(f"  Chunk {chunk['id']:02d} | Category: {pyramid['layer_2_category']}"
-              f" | Keywords: {pyramid['layer_3_keywords'][:5]}")
-
-    print(f"[Ingestion] Knowledge Pyramid built with {len(pyramid_index)} entries\n")
     return pyramid_index
 
 
-# ─────────────────────────────────────────────
-# 5. SAMPLE TEXT (fallback for testing)
-# ─────────────────────────────────────────────
 
-SAMPLE_TEXT = """
-Machine learning is a subset of artificial intelligence that focuses on training models
-to learn from data. Deep learning uses neural networks with many layers to extract
-high-level features from raw inputs. Training a model involves computing a loss function
-and using gradient descent to update model weights.
-
-Natural Language Processing (NLP) deals with enabling computers to understand and generate
-human language. Tokenization breaks text into tokens or sentences. Embeddings map words
-into dense vector spaces where semantic similarity is preserved. Transformer models like
-BERT and GPT have revolutionized NLP tasks such as question answering and text generation.
-
-Retrieval-Augmented Generation (RAG) combines a retrieval system with a language model.
-Given a query, the retrieval module searches an index for relevant documents. These
-documents are then fed as context to the language model to generate a grounded response.
-Vector similarity search using cosine distance is commonly used to find relevant chunks.
-
-Document ingestion pipelines preprocess raw text for downstream retrieval. A sliding
-window approach splits a document into overlapping chunks, preserving context at chunk
-boundaries. Each chunk is processed through a knowledge pyramid: raw text, summary,
-category label, and distilled keywords or embeddings. This hierarchical structure supports
-multi-granularity retrieval — coarse queries match category labels while precise queries
-match raw text or embeddings.
-"""
-
-
-# ─────────────────────────────────────────────
-# 6. MAIN
-# ─────────────────────────────────────────────
+### MAIN EXECUTION
 
 if __name__ == "__main__":
     # Usage: python part1_ingestion.py document.pdf
